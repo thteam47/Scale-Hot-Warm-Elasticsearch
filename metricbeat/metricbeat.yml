@@ -1,0 +1,30 @@
+metricbeat.config.modules:
+  path: "${path.config}/modules.d/*.yml"
+  reload.period: 10s
+  reload.enabled: true
+
+
+processors:
+- add_host_metadata: ~
+- add_docker_metadata: ~
+
+
+monitoring.enabled: true
+
+
+output.elasticsearch:
+  hosts: ["elasticsearch-hot:9200", "elasticsearch-warm:9200", "elasticsearch-cold:9200"]
+
+
+logging.to_files: false
+
+
+setup:
+  kibana.host: "kibana:5601"
+  template.enabled: true
+  dashboards.enabled: true
+  ilm:
+    enabled: true
+    rollover_alias: "metricbeat"
+    pattern: "metricbeat-000000"
+    policy_name: "metricbeat"

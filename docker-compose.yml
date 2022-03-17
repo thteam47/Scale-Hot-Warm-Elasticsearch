@@ -1,0 +1,168 @@
+version: '3'
+services:
+  elasticsearch-hot:
+    container_name: elasticsearch-hot
+    build:
+      dockerfile: ./Dockerfile
+      context: .
+      args:
+        - ELASTIC_VERSION=${ELASTIC_VERSION}
+    image: elasticsearch-scale:$ELASTIC_VERSION
+    environment:
+      - cluster.name=metrics-cluster
+      - node.name=elasticsearch-hot
+      - node.attr.size=hot
+      - bootstrap.memory_lock=true
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+      - discovery.seed_hosts=elasticsearch-warm,elasticsearch-cold
+      - cluster.initial_master_nodes=elasticsearch-hot,elasticsearch-warm,elasticsearch-cold
+      - xpack.monitoring.collection.enabled=true
+      - path.repo=/usr/share/elasticsearch/backup
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    
+    volumes:
+      - elasticsearch_data_hot:/usr/share/elasticsearch/data
+      - elasticsearch_backup:/usr/share/elasticsearch/backup
+    ports:
+      - 9200:9200
+    networks:
+      - esnet
+    deploy:
+      resources: 
+        limits: 
+          cpus: 7
+          memory: 30gb
+    restart: always
+
+  elasticsearch-warm:
+    container_name: elasticsearch-warm
+    build:
+      dockerfile: ./Dockerfile
+      context: .
+      args:
+        - ELASTIC_VERSION=${ELASTIC_VERSION}
+    image: elasticsearch-scale:$ELASTIC_VERSION
+    environment:
+      - cluster.name=metrics-cluster
+      - node.name=elasticsearch-warm
+      - node.attr.size=warm
+      - bootstrap.memory_lock=true
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+      - discovery.seed_hosts=elasticsearch-hot,elasticsearch-cold
+      - cluster.initial_master_nodes=elasticsearch-hot,elasticsearch-warm,elasticsearch-cold
+      - xpack.monitoring.collection.enabled=true
+      - path.repo=/usr/share/elasticsearch/backup
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - elasticsearch_data_warm:/usr/share/elasticsearch/data
+      - elasticsearch_backup:/usr/share/elasticsearch/backup
+    ports:
+      - 9201:9200
+    networks:
+      - esnet
+    deploy:
+      resources: 
+        limits: 
+          cpus: 8
+          memory: 30gb
+    restart: always
+
+  elasticsearch-cold:
+    container_name: elasticsearch-cold
+    build:
+      dockerfile: ./Dockerfile
+      context: .
+      args:
+        - ELASTIC_VERSION=${ELASTIC_VERSION}
+    image: elasticsearch-scale:$ELASTIC_VERSION
+    environment:
+      - cluster.name=metrics-cluster
+      - node.name=elasticsearch-cold
+      - node.attr.size=cold
+      - bootstrap.memory_lock=true
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+      - discovery.seed_hosts=elasticsearch-hot,elasticsearch-warm
+      - cluster.initial_master_nodes=elasticsearch-hot,elasticsearch-warm,elasticsearch-cold
+      - xpack.monitoring.collection.enabled=true
+      - path.repo=/usr/share/elasticsearch/backup
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - elasticsearch_data_cold:/usr/share/elasticsearch/data
+      - elasticsearch_backup:/usr/share/elasticsearch/backup
+    ports:
+      - 9202:9200
+    networks:
+      - esnet
+    deploy:
+      resources: 
+        limits: 
+          cpus: 4
+          memory: 30gb
+    restart: always
+
+  kibana:
+    container_name: kibana
+    image: docker.elastic.co/kibana/kibana:$ELASTIC_VERSION
+    ports:
+      - 5601:5601
+    volumes:
+      - ./kibana.yml:/usr/share/kibana/config/kibana.yml:ro
+    depends_on:
+      - elasticsearch-hot
+      - elasticsearch-warm
+      - elasticsearch-cold
+    networks:
+      - esnet
+
+  configure_stack:
+    container_name: configure_stack
+    image: docker.elastic.co/beats/metricbeat:${ELASTIC_VERSION}
+    volumes:
+      - ./setup/:/opt/setup/:ro
+    command: /opt/setup/setup.sh
+    networks:
+      - esnet
+    depends_on:
+      - elasticsearch-hot
+
+  metricbeat:
+    container_name: metricbeat
+    hostname: metricbeat
+    user: root
+    image: docker.elastic.co/beats/metricbeat:${ELASTIC_VERSION}
+    volumes:
+      - ./metricbeat/metricbeat.yml:/usr/share/metricbeat/metricbeat.yml:ro
+      - ./metricbeat/modules.d/:/usr/share/metricbeat/modules.d/:ro
+      - /proc:/hostfs/proc:ro
+      - /sys/fs/cgroup:/hostfs/sys/fs/cgroup:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /:/hostfs:ro
+    command: metricbeat -e -system.hostfs=/hostfs -strict.perms=false
+    depends_on:
+      - elasticsearch-hot
+      - kibana
+    networks:
+      - esnet
+    restart: on-failure
+
+volumes:
+  elasticsearch_data_warm:
+    driver: local
+  elasticsearch_data_hot:
+    driver: local
+  elasticsearch_data_cold:
+    driver: local
+  elasticsearch_backup:
+    driver: local
+
+networks:
+  esnet:
